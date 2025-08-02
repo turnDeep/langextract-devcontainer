@@ -62,7 +62,7 @@ def main():
         text_or_documents=input_text,
         prompt_description=prompt,
         examples=examples,
-        model_id=os.getenv("DEFAULT_MODEL_ID", "gemini-2.5-pro"),
+        model_id=os.getenv("DEFAULT_MODEL_ID", "gemini-2.5-flash"),
     )
     
     # Display results
