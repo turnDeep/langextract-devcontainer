@@ -13,7 +13,7 @@ class ExtractionHelper:
     
     def __init__(self, model_id: Optional[str] = None):
         """Initialize helper with model configuration."""
-        self.model_id = model_id or os.getenv("DEFAULT_MODEL_ID", "gemini-2.5-pro")
+        self.model_id = model_id or os.getenv("DEFAULT_MODEL_ID", "gemini-2.5-flash")
         self.output_dir = Path(os.getenv("OUTPUT_DIR", "./output"))
         self.output_dir.mkdir(exist_ok=True)
     
