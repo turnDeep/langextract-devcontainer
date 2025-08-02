@@ -10,6 +10,7 @@ if [ ! -f .env ]; then
     cp .env.example .env
     echo "📝 Created .env file from .env.example"
     echo "⚠️  Please add your LANGEXTRACT_API_KEY to .env"
+    echo "ℹ️  Default model is set to gemini-2.5-flash (free tier)"
 fi
 
 # Install pre-commit hooks if available
@@ -25,3 +26,4 @@ fi
 
 echo "✅ Development environment setup complete!"
 echo "📖 Run 'python examples/basic_extraction.py' to test the setup"
+echo "🔄 For batch processing: 'python examples/batch_extraction.py input_files output_files'"
