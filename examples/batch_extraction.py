@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Batch text extraction script with rate limiting for Gemini API free tier.
+Batch text extraction script with rate limiting for Gemini 2.5 Flash API free tier.
 Processes 1000 text files within free tier limits:
 - 10 RPM (Requests Per Minute)
 - 250,000 TPM (Tokens Per Minute)  
 - 250 RPD (Requests Per Day)
+
+Optimized for Gemini 2.5 Flash model with language-aware token estimation.
 """
 
 import os
@@ -18,7 +20,6 @@ import textwrap
 from dataclasses import dataclass, asdict
 from dotenv import load_dotenv
 import langextract as lx
-import tiktoken  # For token counting estimation
 
 # Load environment variables
 load_dotenv()
@@ -33,6 +34,13 @@ class RateLimits:
     
     # Safety margins (use 80% of limits to be safe)
     safety_factor: float = 0.8
+    
+    def __post_init__(self):
+        # Load from environment if available
+        self.requests_per_minute = int(os.getenv('REQUESTS_PER_MINUTE', self.requests_per_minute))
+        self.tokens_per_minute = int(os.getenv('TOKENS_PER_MINUTE', self.tokens_per_minute))
+        self.requests_per_day = int(os.getenv('REQUESTS_PER_DAY', self.requests_per_day))
+        self.safety_factor = float(os.getenv('SAFETY_FACTOR', self.safety_factor))
     
     @property
     def safe_rpm(self) -> int:
@@ -73,30 +81,65 @@ class ProcessingState:
 
 
 class TokenEstimator:
-    """Estimate tokens for rate limiting."""
+    """Estimate tokens for Gemini rate limiting."""
     
     def __init__(self):
-        # Use tiktoken for estimation (GPT-3.5 tokenizer as approximation)
-        try:
-            self.encoder = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        except:
-            self.encoder = tiktoken.get_encoding("cl100k_base")
+        # Gemini token estimation rules
+        # Based on Gemini's approximate token counting
+        self.avg_chars_per_token = {
+            'en': 4,  # English: ~4 characters per token
+            'ja': 2.5,  # Japanese: ~2-3 characters per token
+            'default': 3.5  # Mixed content
+        }
+    
+    def detect_language(self, text: str) -> str:
+        """Simple language detection based on character ranges."""
+        # Count Japanese characters (Hiragana, Katakana, Kanji)
+        japanese_chars = sum(1 for c in text if '\u3040' <= c <= '\u9fff' or '\u30a0' <= c <= '\u30ff')
+        total_chars = len(text)
+        
+        if total_chars == 0:
+            return 'default'
+        
+        japanese_ratio = japanese_chars / total_chars
+        
+        if japanese_ratio > 0.3:  # 30%以上が日本語文字
+            return 'ja'
+        else:
+            return 'en'
     
     def estimate_tokens(self, text: str) -> int:
-        """Estimate token count for text."""
-        return len(self.encoder.encode(text))
+        """Estimate token count for text based on Gemini's tokenization."""
+        if not text:
+            return 0
+        
+        # Detect primary language
+        lang = self.detect_language(text)
+        chars_per_token = self.avg_chars_per_token.get(lang, self.avg_chars_per_token['default'])
+        
+        # Basic estimation
+        estimated_tokens = len(text) / chars_per_token
+        
+        # Add 10% buffer for safety
+        return int(estimated_tokens * 1.1)
     
     def estimate_request_tokens(self, text: str, prompt: str, examples: List) -> int:
-        """Estimate total tokens for a request."""
+        """Estimate total tokens for a Gemini request."""
         total = self.estimate_tokens(text)
         total += self.estimate_tokens(prompt)
         
         # Estimate tokens for examples
         for example in examples:
-            total += self.estimate_tokens(str(example))
+            # Convert example to string representation
+            example_str = f"{example.text} " + " ".join(
+                f"{e.extraction_class}: {e.extraction_text}" 
+                for e in example.extractions
+            )
+            total += self.estimate_tokens(example_str)
         
-        # Add overhead for response (estimate 50% of input)
-        total = int(total * 1.5)
+        # Add overhead for system prompts and response
+        # Gemini typically uses more tokens for structured outputs
+        total = int(total * 1.6)
         
         return total
 
@@ -128,7 +171,7 @@ class BatchExtractor:
         self.state = self._load_state()
         
         # Model configuration
-        self.model_id = "gemini-2.5-flash"  # Using Flash for free tier
+        self.model_id = os.getenv("DEFAULT_MODEL_ID", "gemini-2.5-flash")  # Using Flash for free tier
         
         # Define extraction configuration
         self.prompt = textwrap.dedent("""
